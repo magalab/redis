@@ -28,9 +28,12 @@ RUN apt-get update && \
 COPY --from=builder /workspace/src/redis-server /usr/local/bin/redis-server
 COPY --from=builder /workspace/src/redis-cli /usr/local/bin/redis-cli
 COPY --from=builder /workspace/src/redis-benchmark /usr/local/bin/redis-benchmark
+COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 WORKDIR /data
 VOLUME ["/data"]
 EXPOSE 6379
 USER redis
-ENTRYPOINT ["redis-server"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["redis-server"]
