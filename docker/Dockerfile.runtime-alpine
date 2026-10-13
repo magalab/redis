@@ -1,0 +1,30 @@
+# Build Redis from the selected upstream tag, then publish only runtime files.
+
+FROM alpine:3.23 AS builder
+
+WORKDIR /workspace
+ARG REDIS_REF=unstable
+
+RUN apk add --no-cache \
+      alpine-sdk linux-headers openssl-dev openssl ca-certificates git pkgconf
+
+RUN git clone --depth 1 --branch "${REDIS_REF}" \
+      https://github.com/redis/redis.git /workspace
+
+RUN make -j"$(getconf _NPROCESSORS_ONLN)" BUILD_TLS=yes
+
+FROM alpine:3.23
+
+RUN apk add --no-cache ca-certificates openssl && \
+    addgroup -S redis && adduser -S -D -H -h /data -G redis redis && \
+    mkdir -p /data && chown redis:redis /data
+
+COPY --from=builder /workspace/src/redis-server /usr/local/bin/redis-server
+COPY --from=builder /workspace/src/redis-cli /usr/local/bin/redis-cli
+COPY --from=builder /workspace/src/redis-benchmark /usr/local/bin/redis-benchmark
+
+WORKDIR /data
+VOLUME ["/data"]
+EXPOSE 6379
+USER redis
+ENTRYPOINT ["redis-server"]

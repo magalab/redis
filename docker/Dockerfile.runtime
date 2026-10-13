@@ -1,6 +1,6 @@
-# Build Redis from this checkout, then publish only the runtime artifacts.
+# Build Redis from the selected upstream tag, then publish only runtime files.
 
-FROM ubuntu:24.04 AS builder
+FROM debian:trixie AS builder
 
 WORKDIR /workspace
 ENV DEBIAN_FRONTEND=noninteractive
@@ -16,7 +16,7 @@ RUN git clone --depth 1 --branch "${REDIS_REF}" \
 
 RUN make -j"$(nproc)" BUILD_TLS=yes
 
-FROM ubuntu:24.04
+FROM debian:trixie
 
 ENV DEBIAN_FRONTEND=noninteractive
 
