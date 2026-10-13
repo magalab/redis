@@ -4,13 +4,15 @@ FROM ubuntu:24.04 AS builder
 
 WORKDIR /workspace
 ENV DEBIAN_FRONTEND=noninteractive
+ARG REDIS_REF=unstable
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      ca-certificates gcc g++ libc6-dev libssl-dev make pkg-config && \
+      ca-certificates gcc g++ libc6-dev libssl-dev make pkg-config git && \
     rm -rf /var/lib/apt/lists/*
 
-COPY . .
+RUN git clone --depth 1 --branch "${REDIS_REF}" \
+      https://github.com/redis/redis.git /workspace
 
 RUN make -j"$(nproc)" BUILD_TLS=yes
 
