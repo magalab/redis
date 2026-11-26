@@ -1,0 +1,102 @@
+name: Sync latest Redis major
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: sync-redis-major
+  cancel-in-progress: false
+
+env:
+  REDIS_MAJOR: '8'
+  UPSTREAM_URL: https://github.com/redis/redis.git
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out maintained branch
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Find latest Redis 8 branch and release tag
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          branch="$({
+            git ls-remote --heads "$UPSTREAM_URL" "refs/heads/${REDIS_MAJOR}.*" |
+              awk '{sub("refs/heads/", "", $2); print $2}'
+          } | sort -V | tail -n 1)"
+
+          tag="$({
+            git ls-remote --tags --refs "$UPSTREAM_URL" "refs/tags/${REDIS_MAJOR}.*" |
+              awk -F/ '{print $3}'
+          } | grep -E "^${REDIS_MAJOR}\\.[0-9]+\\.[0-9]+$" | sort -V | tail -n 1)"
+
+          test -n "$branch" || { echo 'No matching upstream major branch found' >&2; exit 1; }
+          test -n "$tag" || { echo 'No matching upstream release tag found' >&2; exit 1; }
+
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Using upstream branch: $branch"
+          echo "Using upstream release tag: $tag"
+
+      - name: Merge upstream without rewriting history
+        id: merge
+        shell: bash
+        env:
+          UPSTREAM_BRANCH: ${{ steps.upstream.outputs.branch }}
+        run: |
+          set -euo pipefail
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags upstream \
+            "+refs/heads/${UPSTREAM_BRANCH}:refs/remotes/upstream/${UPSTREAM_BRANCH}"
+
+          before=$(git rev-parse HEAD)
+          if ! git merge --no-ff --no-edit "refs/remotes/upstream/${UPSTREAM_BRANCH}"; then
+            git merge --abort || true
+            echo 'Upstream merge has conflicts; remote branches were not changed.' >&2
+            exit 1
+          fi
+          after=$(git rev-parse HEAD)
+
+          if [ "$before" = "$after" ]; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo 'Already synchronized.'
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+            echo "Merged upstream into $after"
+          fi
+
+      - name: Push synchronized branches
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git push origin HEAD:main
+          git push origin HEAD:unstable
+
+      - name: Trigger GHCR build for latest Redis 8 release
+        if: steps.merge.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          gh workflow run publish-ghcr.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref unstable \
+            -f tag="$RELEASE_TAG"
