@@ -1,4 +1,4 @@
-name: Sync latest Redis major
+name: Sync latest Redis release
 
 on:
   schedule:
@@ -28,7 +28,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Find latest Redis major branch and release tag
+      - name: Find latest Redis major and release tag
         id: upstream
         shell: bash
         run: |
@@ -58,7 +58,7 @@ jobs:
           echo "Using upstream branch: $branch"
           echo "Using upstream release tag: $tag"
 
-      - name: Merge upstream without rewriting history
+      - name: Merge official release into main
         id: merge
         shell: bash
         env:
@@ -69,11 +69,14 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git remote add upstream "$UPSTREAM_URL"
+          RELEASE_TAG="${{ steps.upstream.outputs.tag }}"
           git fetch --no-tags upstream \
-            "+refs/heads/${UPSTREAM_BRANCH}:refs/remotes/upstream/${UPSTREAM_BRANCH}"
+            "+refs/tags/${RELEASE_TAG}:refs/remotes/upstream/tags/${RELEASE_TAG}"
 
           before=$(git rev-parse HEAD)
-          if ! git merge --no-ff --no-edit "refs/remotes/upstream/${UPSTREAM_BRANCH}"; then
+          if git merge-base --is-ancestor "refs/remotes/upstream/tags/${RELEASE_TAG}" HEAD; then
+            echo "Release ${RELEASE_TAG} is already contained in main."
+          elif ! git merge --no-ff --no-edit "refs/remotes/upstream/tags/${RELEASE_TAG}"; then
             git merge --abort || true
             echo 'Upstream merge has conflicts; remote branches were not changed.' >&2
             exit 1
@@ -88,7 +91,7 @@ jobs:
             echo "Merged upstream into $after"
           fi
 
-      - name: Push synchronized branches
+      - name: Push updated main
         if: steps.merge.outputs.changed == 'true'
         run: |
           set -euo pipefail
@@ -134,8 +137,26 @@ jobs:
 
           git push origin HEAD:unstable
 
-      - name: Trigger GHCR build for latest major release
-        if: steps.merge.outputs.changed == 'true'
+      - name: Create and push matching release tag
+        id: tag
+        env:
+          RELEASE_TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          remote_tag=$(git ls-remote origin "refs/tags/${RELEASE_TAG}" | awk '{print $1}')
+          if [ -n "$remote_tag" ]; then
+            echo "Release tag ${RELEASE_TAG} already exists on origin; leaving it unchanged."
+            echo 'created=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git tag "$RELEASE_TAG" HEAD
+          git push origin "refs/tags/${RELEASE_TAG}"
+          echo 'created=true' >> "$GITHUB_OUTPUT"
+
+      - name: Trigger GHCR build for release tag
+        if: steps.tag.outputs.created == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.upstream.outputs.tag }}
