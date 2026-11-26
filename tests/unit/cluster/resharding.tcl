@@ -36,6 +36,12 @@ test "Enable AOF in all the instances" {
 # - Finally the keys are checked to see if they contain the value they should.
 set numkeys 50000
 set numops 200000
+if {$::valgrind} {
+    # Keep it fast under valgrind, the resharding still runs concurrently
+    # with the second half of the writes.
+    set numkeys 5000
+    set numops 20000
+}
 set start_node_port [srv 0 port]
 set cluster [redis_cluster 127.0.0.1:$start_node_port]
 if {$::tls} {
@@ -111,6 +117,18 @@ test "Cluster consistency during live resharding" {
     }
 }
 
+# The masters must hold exactly our logical content: checking only our keys would
+# miss leftovers, e.g. an old dataset resurrected by an AOF restart.
+proc verify_no_extra_keys {expected} {
+    set total 0
+    for {set id 0} {$id < [llength $::servers]} {incr id} {
+        if {[lindex [R $id role] 0] eq {master}} {
+            incr total [R $id dbsize]
+        }
+    }
+    assert_equal $expected $total
+}
+
 test "Verify $numkeys keys for consistency with logical content" {
     # Check that the Redis Cluster content matches our logical content.
     foreach {key value} [array get content] {
@@ -118,6 +136,7 @@ test "Verify $numkeys keys for consistency with logical content" {
             fail "Key $key expected to hold '$value' but actual content is [$cluster lrange $key 0 -1]"
         }
     }
+    verify_no_extra_keys [array size content]
 }
 
 test "Terminate and restart all the instances" {
@@ -141,6 +160,7 @@ test "Verify $numkeys keys after the restart" {
             fail "Key $key expected to hold '$value' but actual content is [$cluster lrange $key 0 -1]"
         }
     }
+    verify_no_extra_keys [array size content]
 }
 
 test "Disable AOF in all the instances" {
