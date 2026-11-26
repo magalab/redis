@@ -104,25 +104,32 @@ jobs:
             '+refs/heads/unstable:refs/remotes/upstream/unstable'
           git switch --detach origin/unstable
 
-          if ! git merge --no-ff --no-edit refs/remotes/upstream/unstable; then
-            git merge --abort || true
-            echo 'Upstream unstable merge has conflicts; unstable was not changed.' >&2
-            exit 1
-          fi
+          if git merge-base --is-ancestor HEAD refs/remotes/upstream/unstable; then
+            # Once unstable is reset to upstream, keep it byte-for-byte aligned
+            # with fast-forward updates and do not create downstream commits.
+            git merge --ff-only refs/remotes/upstream/unstable
+          else
+            # One-time compatibility path for the existing diverged branch.
+            if ! git merge --no-ff --no-edit refs/remotes/upstream/unstable; then
+              git merge --abort || true
+              echo 'Upstream unstable merge has conflicts; unstable was not changed.' >&2
+              exit 1
+            fi
 
-          # Keep downstream maintenance files on main only.
-          rm -f \
-            .github/workflows/publish-ghcr.yml \
-            .github/workflows/sync-redis-major.yml \
-            docker/Dockerfile.runtime \
-            docker/Dockerfile.runtime-alpine \
-            docker/docker-entrypoint.sh
+            # Keep downstream maintenance files on main only.
+            rm -f \
+              .github/workflows/publish-ghcr.yml \
+              .github/workflows/sync-redis-major.yml \
+              docker/Dockerfile.runtime \
+              docker/Dockerfile.runtime-alpine \
+              docker/docker-entrypoint.sh
 
-          git add -A
-          if ! git diff --cached --quiet; then
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git commit -m 'Keep unstable aligned with upstream'
+            git add -A
+            if ! git diff --cached --quiet; then
+              git config user.name 'github-actions[bot]'
+              git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+              git commit -m 'Keep unstable aligned with upstream'
+            fi
           fi
 
           git push origin HEAD:unstable
