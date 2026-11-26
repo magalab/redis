@@ -65,7 +65,7 @@ jobs:
       - name: Check out workflow files
         uses: actions/checkout@v6
         with:
-          ref: unstable
+          ref: main
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

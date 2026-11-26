@@ -93,6 +93,38 @@ jobs:
         run: |
           set -euo pipefail
           git push origin HEAD:main
+
+      - name: Synchronize upstream-only unstable branch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags origin unstable
+          git fetch --no-tags upstream \
+            '+refs/heads/unstable:refs/remotes/upstream/unstable'
+          git switch --detach origin/unstable
+
+          if ! git merge --no-ff --no-edit refs/remotes/upstream/unstable; then
+            git merge --abort || true
+            echo 'Upstream unstable merge has conflicts; unstable was not changed.' >&2
+            exit 1
+          fi
+
+          # Keep downstream maintenance files on main only.
+          rm -f \
+            .github/workflows/publish-ghcr.yml \
+            .github/workflows/sync-redis-major.yml \
+            docker/Dockerfile.runtime \
+            docker/Dockerfile.runtime-alpine \
+            docker/docker-entrypoint.sh
+
+          git add -A
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Keep unstable aligned with upstream'
+          fi
+
           git push origin HEAD:unstable
 
       - name: Trigger GHCR build for latest major release
@@ -103,5 +135,5 @@ jobs:
         run: |
           gh workflow run publish-ghcr.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --ref unstable \
+            --ref main \
             -f tag="$RELEASE_TAG"
